@@ -1,0 +1,209 @@
+name: Build and Publish to GHCR
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      pi_web_version:
+        description: 'Version of @agegr/pi-web (for example "0.8.6")'
+        required: false
+        default: latest
+      pi_coding_agent_version:
+        description: 'Version of @earendil-works/pi-coding-agent (for example "0.83.0")'
+        required: false
+        default: latest
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: huangyxi/pi
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.arch }} image
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: linux/amd64
+            runner: ubuntu-latest
+          - arch: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Prepare build variables
+        env:
+          INPUT_PI_WEB_VERSION: ${{ inputs.pi_web_version }}
+          INPUT_PI_CODING_AGENT_VERSION: ${{ inputs.pi_coding_agent_version }}
+        run: |
+          echo "FULL_IMAGE_NAME=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+
+          pi_web_version=${INPUT_PI_WEB_VERSION:-latest}
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            pi_web_version=${GITHUB_REF_NAME#v}
+          fi
+          if [[ "$pi_web_version" == "latest" ]]; then
+            pi_web_version=$(npm view @agegr/pi-web version)
+          fi
+          echo "PI_WEB_VERSION=${pi_web_version}" >> "$GITHUB_ENV"
+
+          pi_version=${INPUT_PI_CODING_AGENT_VERSION:-latest}
+          if [[ "$pi_version" == "latest" ]]; then
+            pi_version=$(npm view @earendil-works/pi-coding-agent version)
+          fi
+          echo "PI_CODING_AGENT_VERSION=${pi_version}" >> "$GITHUB_ENV"
+
+          platform='${{ matrix.platform.arch }}'
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FULL_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Extract cache metadata
+        id: cache-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FULL_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            ${{ github.ref_type == 'tag' && 'type=raw,value=main' || '' }}
+            ${{ github.event_name == 'pull_request' && 'type=ref,event=pr' || '' }}
+          flavor: |
+            prefix=cache-${{ matrix.platform.arch }}-
+            latest=false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          build-args: |
+            PI_WEB_VERSION=${{ env.PI_WEB_VERSION }}
+            PI_CODING_AGENT_VERSION=${{ env.PI_CODING_AGENT_VERSION }}
+          context: .
+          platforms: ${{ matrix.platform.arch }}
+          push: ${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=${{ github.event_name != 'pull_request' }},name-canonical=true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0},mode=max', steps.cache-meta.outputs.tags) || '' }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish multi-architecture image
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name != 'pull_request' && success() }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Prepare image name
+        run: echo "FULL_IMAGE_NAME=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FULL_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create and push manifest list
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.FULL_IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect "${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+
+  delete-images:
+    name: Delete unused GHCR images
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      packages: write
+    steps:
+      - name: Delete untagged images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package: pi
+          older-than: 3 days
+
+      - name: Delete old cache images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package: pi
+          delete-tags: 'cache-*'
+          keep-n-tagged: 2

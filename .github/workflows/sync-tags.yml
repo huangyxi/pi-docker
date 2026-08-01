@@ -1,0 +1,40 @@
+name: Sync Upstream Tags
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-tags:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Check and sync upstream tags
+        env:
+          UPSTREAM_REPO: agegr/pi-web
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest_upstream_tag=$(gh api "repos/${UPSTREAM_REPO}/tags" --jq '.[0].name')
+
+          if [[ -z "$latest_upstream_tag" || "$latest_upstream_tag" == "null" ]]; then
+            echo "No tags found in upstream."
+            exit 0
+          fi
+
+          if git rev-parse "refs/tags/${latest_upstream_tag}" >/dev/null 2>&1; then
+            echo "Tag ${latest_upstream_tag} already exists locally."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$latest_upstream_tag"
+          git push origin "$latest_upstream_tag"

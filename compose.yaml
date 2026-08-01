@@ -1,0 +1,18 @@
+services:
+  pi:
+    container_name: ${CONTAINER_NAME:-pi}
+    image: ghcr.io/huangyxi/pi:${IMAGE_TAG:-latest}
+    userns_mode: keep-id:uid=1000,gid=1000
+    init: true
+    ports:
+      - "${SERVER_PORT:-30141}:30141"
+    environment:
+      PI_WEB_PASSWORD: ${PI_WEB_PASSWORD:-}
+      PI_WEB_ALLOWED_HOSTS: ${PI_WEB_ALLOWED_HOSTS:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
+    volumes:
+      - ./workspace:/home/node:Z
+      - ./pi:/home/node/.pi:Z
+    restart: unless-stopped
