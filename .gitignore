@@ -1,3 +1,20 @@
+# Environment
 .env
-/pi/
-/workspace/
+
+# Docker Compose overrides
+/compose.override.yaml
+/compose.override.yml
+
+# Local project directories
+/*/
+/!.github/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

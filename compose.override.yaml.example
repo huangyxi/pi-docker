@@ -1,0 +1,7 @@
+services:
+  pi:
+    environment:
+      PI_OFFLINE: "1"
+    volumes:
+      - ./pi-toolchain:/opt/pi-toolchain:Z
+    restart: always
