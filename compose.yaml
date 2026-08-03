@@ -2,6 +2,13 @@ services:
   pi:
     container_name: ${CONTAINER_NAME:-pi}
     image: ghcr.io/huangyxi/pi:${IMAGE_TAG:-latest}
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     PI_WEB_VERSION: ${PI_WEB_VERSION:-latest}
+    #     PI_CODING_AGENT_VERSION: ${PI_CODING_AGENT_VERSION:-latest}
+    #     SUDO_PASSWORD: ${SUDO_PASSWORD:-}
     userns_mode: keep-id:uid=1000,gid=1000
     init: true
     ports:
@@ -13,6 +20,7 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
     volumes:
-      - ./workspace:/home/node:Z
+      - ./home:/home/node:Z
       - ./pi:/home/node/.pi:Z
+      - ./workspaces:/workspaces:Z
     restart: unless-stopped
