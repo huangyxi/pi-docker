@@ -2,6 +2,9 @@ services:
   pi:
     environment:
       PI_OFFLINE: "1"
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
     volumes:
       - ./pi-toolchain:/opt/pi-toolchain:Z
     restart: always
