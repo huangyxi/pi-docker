@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-ARG	NODE_VERSION="24"
+ARG	NODE_VERSION="26"
 ARG	PI_WEB_VERSION="latest"
 ARG	PI_CODING_AGENT_VERSION="latest"
 
