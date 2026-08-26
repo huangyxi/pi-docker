@@ -1,4 +1,4 @@
-name: Build and Publish to GHCR
+name: Build and Publish Images
 
 on:
   schedule:
@@ -23,8 +23,10 @@ on:
         default: latest
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: huangyxi/pi
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE_NAME: huangyxi/pi
+  DOCKERHUB_REGISTRY: docker.io
+  DOCKERHUB_IMAGE_NAME: hyxi/pi
 
 jobs:
   build:
@@ -47,7 +49,7 @@ jobs:
           INPUT_PI_WEB_VERSION: ${{ inputs.pi_web_version }}
           INPUT_PI_CODING_AGENT_VERSION: ${{ inputs.pi_coding_agent_version }}
         run: |
-          echo "FULL_IMAGE_NAME=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+          echo "GHCR_FULL_IMAGE_NAME=${GHCR_REGISTRY}/${GHCR_IMAGE_NAME}" >> "$GITHUB_ENV"
 
           pi_web_version=${INPUT_PI_WEB_VERSION:-latest}
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -71,7 +73,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.FULL_IMAGE_NAME }}
+          images: ${{ env.GHCR_FULL_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -82,7 +84,7 @@ jobs:
         id: cache-meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.FULL_IMAGE_NAME }}
+          images: ${{ env.GHCR_FULL_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             ${{ github.ref_type == 'tag' && 'type=raw,value=main' || '' }}
@@ -101,7 +103,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -118,7 +120,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform.arch }}
           push: ${{ github.event_name != 'pull_request' }}
-          outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=${{ github.event_name != 'pull_request' }},name-canonical=true
+          outputs: type=image,name=${{ env.GHCR_FULL_IMAGE_NAME }},push-by-digest=${{ github.event_name != 'pull_request' }},name-canonical=true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0},mode=max', steps.cache-meta.outputs.tags) || '' }}
@@ -149,7 +151,9 @@ jobs:
       packages: write
     steps:
       - name: Prepare image name
-        run: echo "FULL_IMAGE_NAME=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+        run: |
+          echo "GHCR_FULL_IMAGE_NAME=${GHCR_REGISTRY}/${GHCR_IMAGE_NAME}" >> "$GITHUB_ENV"
+          echo "DOCKERHUB_FULL_IMAGE_NAME=${DOCKERHUB_REGISTRY}/${DOCKERHUB_IMAGE_NAME}" >> "$GITHUB_ENV"
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -164,7 +168,7 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -172,21 +176,45 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.FULL_IMAGE_NAME }}
+          images: ${{ env.GHCR_FULL_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      - name: Create and push manifest list
+      - name: Create and push manifest list to GHCR
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.FULL_IMAGE_NAME }}@sha256:%s ' *)
+            $(printf '${{ env.GHCR_FULL_IMAGE_NAME }}@sha256:%s ' *)
 
-      - name: Inspect image
-        run: docker buildx imagetools inspect "${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+      - name: Inspect GHCR image
+        run: |
+          docker buildx imagetools inspect "${{ env.GHCR_FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Mirror tags to Docker Hub
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: |
+          mapfile -t source_tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for source_tag in "${source_tags[@]}"; do
+            tag="${source_tag##*:}"
+            docker buildx imagetools create \
+              -t "${DOCKERHUB_FULL_IMAGE_NAME}:${tag}" \
+              "${source_tag}"
+          done
+
+      - name: Inspect Docker Hub image
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: |
+          docker buildx imagetools inspect "${{ env.DOCKERHUB_FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
 
   delete-images:
     name: Delete unused GHCR images
