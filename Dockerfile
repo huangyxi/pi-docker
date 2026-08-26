@@ -41,16 +41,22 @@ RUN	--mount=type=cache,target=/var/cache/apt,sharing=locked \
 	apt-get install --no-install-recommends --yes ${DEBIAN_PACKAGES}
 EOF
 
+RUN	<<-EOF
+	command -v curl && curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL=/usr/local/bin sh
+EOF
+
 ARG	SUDO_PASSWORD
 RUN	<<-EOF
-	if command -v sudo; then
-		mkdir -p /etc/sudoers.d
-		if [ -n "${SUDO_PASSWORD}" ]; then
-			echo "node	ALL=(ALL:ALL) ALL" > /etc/sudoers.d/node
-			echo "node:${SUDO_PASSWORD}" | chpasswd
-		else
-			echo "node	ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/node
-		fi
+	if ! command -v sudo; then
+		echo "sudo is not installed, skipping sudo configuration"
+		exit 0
+	fi
+	mkdir -p /etc/sudoers.d
+	if [ -n "${SUDO_PASSWORD}" ]; then
+		echo "node	ALL=(ALL:ALL) ALL" > /etc/sudoers.d/node
+		echo "node:${SUDO_PASSWORD}" | chpasswd
+	else
+		echo "node	ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/node
 	fi
 EOF
 
