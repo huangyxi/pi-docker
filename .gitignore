@@ -7,7 +7,7 @@
 
 # Local project directories
 /*/
-/!.github/
+!/.github/
 
 # Editor
 *.swp

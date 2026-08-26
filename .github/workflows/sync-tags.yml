@@ -2,27 +2,26 @@ name: Sync Upstream Tags
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *' # Runs daily at 00:00 UTC
   workflow_dispatch:
 
 jobs:
   sync-tags:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Required to push new tags to your repository
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Required to fetch all local tags for comparison
           token: ${{ secrets.GH_PAT }}
 
       - name: Check and sync upstream tags
         env:
-          UPSTREAM_REPO: agegr/pi-web
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_PACKAGE: "@agegr/pi-web"
         run: |
-          latest_upstream_tag=$(gh api "repos/${UPSTREAM_REPO}/tags" --jq '.[0].name')
+          latest_upstream_tag=v$(npm view "$NPM_PACKAGE" version)
 
           if [[ -z "$latest_upstream_tag" || "$latest_upstream_tag" == "null" ]]; then
             echo "No tags found in upstream."
