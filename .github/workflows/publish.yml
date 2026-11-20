@@ -13,6 +13,10 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      npm_version:
+        description: 'Version of npm (for example "11.3.0")'
+        required: false
+        default: latest
       pi_web_version:
         description: 'Version of @agegr/pi-web (for example "0.8.6")'
         required: false
@@ -46,10 +50,17 @@ jobs:
     steps:
       - name: Prepare build variables
         env:
+          INPUT_NPM_VERSION: ${{ inputs.npm_version }}
           INPUT_PI_WEB_VERSION: ${{ inputs.pi_web_version }}
           INPUT_PI_CODING_AGENT_VERSION: ${{ inputs.pi_coding_agent_version }}
         run: |
           echo "GHCR_FULL_IMAGE_NAME=${GHCR_REGISTRY}/${GHCR_IMAGE_NAME}" >> "$GITHUB_ENV"
+
+          npm_version=${INPUT_NPM_VERSION:-latest}
+          if [[ "$npm_version" == "latest" ]]; then
+            npm_version=$(npm view npm version)
+          fi
+          echo "NPM_VERSION=${npm_version}" >> "$GITHUB_ENV"
 
           pi_web_version=${INPUT_PI_WEB_VERSION:-latest}
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -115,6 +126,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           build-args: |
+            NPM_VERSION=${{ env.NPM_VERSION }}
             PI_WEB_VERSION=${{ env.PI_WEB_VERSION }}
             PI_CODING_AGENT_VERSION=${{ env.PI_CODING_AGENT_VERSION }}
           context: .

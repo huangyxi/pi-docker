@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.4
 
 ARG	NODE_VERSION="26"
+ARG	NPM_VERSION="latest"
 ARG	PI_WEB_VERSION="latest"
 ARG	PI_CODING_AGENT_VERSION="latest"
 
@@ -9,6 +10,10 @@ ARG	DEBIAN_PACKAGES="sudo bash curl ca-certificates git openssh-client python3-p
 ARG	SUDO_PASSWORD=
 
 FROM	node:${NODE_VERSION}-trixie-slim AS base
+ARG	NPM_VERSION
+RUN	--mount=type=cache,target=/root/.npm <<-EOF
+	npm install --global "npm@${NPM_VERSION}"
+EOF
 
 
 FROM	base AS app
